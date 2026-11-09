@@ -746,13 +746,16 @@ static void saturn_android_splash_credit() {
     ImGui::NewFrame();
     ImGuiIO& cio = ImGui::GetIO();
     ImDrawList* cdl = ImGui::GetForegroundDrawList();
-    const char* credit = "Android Port By SJG4 (JuanFunkin)";
+    const char* credits[2] = { "Android Port By SJG4 (JuanFunkin)", "Fork By amoggo64" };
     ImFont* cfont = ImGui::GetFont();
     float cfs = ImGui::GetFontSize() * 2.4f;
-    ImVec2 cts = cfont->CalcTextSizeA(cfs, 100000.f, 0.f, credit);
-    ImVec2 cpos((cio.DisplaySize.x - cts.x) * 0.5f, cio.DisplaySize.y * 0.84f);
-    cdl->AddText(cfont, cfs, ImVec2(cpos.x + 2.f, cpos.y + 2.f), IM_COL32(0, 0, 0, 210), credit);
-    cdl->AddText(cfont, cfs, cpos, IM_COL32(255, 255, 255, 255), credit);
+    for (int ci = 0; ci < 2; ci++) {
+        const char* credit = credits[ci];
+        ImVec2 cts = cfont->CalcTextSizeA(cfs, 100000.f, 0.f, credit);
+        ImVec2 cpos((cio.DisplaySize.x - cts.x) * 0.5f, cio.DisplaySize.y * 0.84f + ci * cfs * 1.2f);
+        cdl->AddText(cfont, cfs, ImVec2(cpos.x + 2.f, cpos.y + 2.f), IM_COL32(0, 0, 0, 210), credit);
+        cdl->AddText(cfont, cfs, cpos, IM_COL32(255, 255, 255, 255), credit);
+    }
     ImGui::Render();
     GLint prev_program;
     glGetIntegerv(GL_CURRENT_PROGRAM, &prev_program);
