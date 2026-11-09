@@ -284,7 +284,6 @@ void main_func(void) {
     // Startup code can reset some settings after the first load, so read the saved settings again now that everything is set up.
     fprintf(stdout, "[cfgdbg] before reload: fullscreen=%d filtering=%d\n", (int)configWindow.fullscreen, (int)configFiltering);
     configfile_load(configfile_name());
-    configWindow.settings_changed = true;
     fprintf(stdout, "[cfgdbg] after reload: fullscreen=%d filtering=%d\n", (int)configWindow.fullscreen, (int)configFiltering);
     fflush(stdout);
 #endif
