@@ -35,7 +35,7 @@ import java.util.zip.CRC32;
  * Start screen (Saturn background + logo).
  *
  * - Saturn keeps ALL its files (dynos, models, textures, res, config, saves, logs) in
- *   /storage/emulated/0/com.saturn64, like the PC version. This needs "All files access".
+ *   /storage/emulated/0/com.amoggo64.saturn, like the PC version. This needs "All files access".
  *   If the user refuses, the app falls back to its private storage.
  * - "Import ROM" opens the phone's file picker; the ROM is copied to <data>/sm64.z64 and verified
  *   (size + CRC32). Saturn extracts the assets from it on the first run.
@@ -50,7 +50,7 @@ public class ImportActivity extends Activity {
     private static final int REQ_STORAGE = 1003;
     private static final long ROM_SIZE = 8L * 1024 * 1024;
     private static final long ROM_CRC32 = 0x3CE60709L;
-    private static final String DATA_FOLDER = "com.saturn64";
+    private static final String DATA_FOLDER = "com.amoggo64.saturn";
 
     private TextView status;
     private Button importButton;
@@ -495,7 +495,7 @@ public class ImportActivity extends Activity {
         String text = buildLogText(30000, 0, 8000);
         Intent send = new Intent(Intent.ACTION_SEND);
         send.setType("text/plain");
-        send.putExtra(Intent.EXTRA_SUBJECT, "Saturn 64 Android log");
+        send.putExtra(Intent.EXTRA_SUBJECT, "Saturn Android log");
         send.putExtra(Intent.EXTRA_TEXT, text);
         startActivity(Intent.createChooser(send, "Share log"));
     }
