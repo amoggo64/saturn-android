@@ -217,6 +217,11 @@ void main_func(void) {
     fs_init(sys_ropaths, gamedir, userpath);
 
     configfile_load(configfile_name());
+#ifdef __ANDROID__
+    fprintf(stdout, "[cfgdbg] after first load: file=%s fullscreen=%d filtering=%d cli_fs=%d\n",
+            configfile_name(), (int)configWindow.fullscreen, (int)configFiltering, (int)gCLIOpts.FullScreen);
+    fflush(stdout);
+#endif
 
     if (gCLIOpts.FullScreen == 1)
         configWindow.fullscreen = true;
@@ -274,6 +279,15 @@ void main_func(void) {
     thread5_game_loop(NULL);
 
     inited = true;
+
+#ifdef __ANDROID__
+    // Startup code can reset some settings after the first load, so read the saved settings again now that everything is set up.
+    fprintf(stdout, "[cfgdbg] before reload: fullscreen=%d filtering=%d\n", (int)configWindow.fullscreen, (int)configFiltering);
+    configfile_load(configfile_name());
+    configWindow.settings_changed = true;
+    fprintf(stdout, "[cfgdbg] after reload: fullscreen=%d filtering=%d\n", (int)configWindow.fullscreen, (int)configFiltering);
+    fflush(stdout);
+#endif
 
 #ifdef EXTERNAL_DATA
     // precache data if needed
