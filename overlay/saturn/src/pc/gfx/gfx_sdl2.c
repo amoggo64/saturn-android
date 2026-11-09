@@ -351,8 +351,29 @@ static void gfx_sdl_handle_events(void) {
             case SDL_QUIT:
                 game_exit();
                 break;
+#ifdef __ANDROID__
+            // Android never sends SDL_QUIT when the app is swiped away, so save settings when going to the background.
+            case SDL_APP_WILLENTERBACKGROUND:
+            case SDL_APP_DIDENTERBACKGROUND:
+            case SDL_APP_TERMINATING:
+                configfile_save(configfile_name());
+                break;
+#endif
         }
     }
+
+#ifdef __ANDROID__
+    // Also save the settings every 10 seconds, in case the app gets killed without any warning.
+    {
+        static Uint32 last_config_save = 0;
+        Uint32 now_ticks = SDL_GetTicks();
+        if (last_config_save == 0) last_config_save = now_ticks;
+        if (now_ticks - last_config_save >= 10000) {
+            configfile_save(configfile_name());
+            last_config_save = now_ticks;
+        }
+    }
+#endif
 
     if (configWindow.settings_changed) {
         gfx_sdl_set_fullscreen();
