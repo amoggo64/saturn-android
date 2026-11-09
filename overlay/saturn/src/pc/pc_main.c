@@ -211,11 +211,36 @@ static void on_anim_frame(double time) {
 }
 #endif
 
+#ifdef __ANDROID__
+#include <sys/stat.h>
+// Saturn can only READ its config from the mounted "res" folders, but it WRITES it to the data folder, so on Android it
+// never found the saved file, "created" a new default one and overwrote the saved settings on every start.
+// Copy the saved file into <data>/res before loading, where it can be found. (The working directory is the data folder.)
+static void android_stage_config(void) {
+    const char *name = configfile_name();
+    FILE *src = fopen(name, "rb");
+    if (!src) return;
+    mkdir("res", 0777);
+    char dstpath[1200];
+    snprintf(dstpath, sizeof(dstpath), "res/%s", name);
+    FILE *dst = fopen(dstpath, "wb");
+    if (!dst) { fclose(src); return; }
+    char buf[4096];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), src)) > 0) fwrite(buf, 1, n, dst);
+    fclose(src);
+    fclose(dst);
+}
+#endif
+
 void main_func(void) {
     const char *gamedir = gCLIOpts.GameDir[0] ? gCLIOpts.GameDir : FS_BASEDIR;
     const char *userpath = gCLIOpts.SavePath[0] ? gCLIOpts.SavePath : sys_user_path();
     fs_init(sys_ropaths, gamedir, userpath);
 
+#ifdef __ANDROID__
+    android_stage_config();
+#endif
     configfile_load(configfile_name());
 #ifdef __ANDROID__
     fprintf(stdout, "[cfgdbg] after first load: file=%s fullscreen=%d filtering=%d cli_fs=%d\n",
@@ -279,14 +304,6 @@ void main_func(void) {
     thread5_game_loop(NULL);
 
     inited = true;
-
-#ifdef __ANDROID__
-    // Startup code can reset some settings after the first load, so read the saved settings again now that everything is set up.
-    fprintf(stdout, "[cfgdbg] before reload: fullscreen=%d filtering=%d\n", (int)configWindow.fullscreen, (int)configFiltering);
-    configfile_load(configfile_name());
-    fprintf(stdout, "[cfgdbg] after reload: fullscreen=%d filtering=%d\n", (int)configWindow.fullscreen, (int)configFiltering);
-    fflush(stdout);
-#endif
 
 #ifdef EXTERNAL_DATA
     // precache data if needed
