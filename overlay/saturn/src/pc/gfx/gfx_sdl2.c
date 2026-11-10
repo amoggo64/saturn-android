@@ -421,8 +421,166 @@ static inline void sync_framerate_with_timer(void) {
     }
 }
 
+#ifdef __ANDROID__
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <sys/stat.h>
+
+// Screenshots. The touch UI sets android_screenshot_request on a frame that has no panels on screen; the frame is
+// then saved as screenshots/screenshot_<date>_<time>.png (inside Saturn's data folder) right before it is shown.
+int android_screenshot_request = 0;
+int android_screenshot_result = 0;      // 1 = saved, -1 = failed (read by the touch UI to show a message)
+char android_screenshot_name[96] = { 0 };
+
+static uint32_t shot_crc_table[256];
+static int shot_crc_ready = 0;
+
+static void shot_crc_init(void) {
+    for (uint32_t n = 0; n < 256; n++) {
+        uint32_t c = n;
+        for (int k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320u ^ (c >> 1)) : (c >> 1);
+        shot_crc_table[n] = c;
+    }
+    shot_crc_ready = 1;
+}
+
+static uint32_t shot_crc_update(uint32_t crc, const unsigned char *buf, size_t len) {
+    for (size_t i = 0; i < len; i++) crc = shot_crc_table[(crc ^ buf[i]) & 0xFF] ^ (crc >> 8);
+    return crc;
+}
+
+static void shot_put32(unsigned char *p, uint32_t v) {
+    p[0] = (unsigned char)(v >> 24); p[1] = (unsigned char)(v >> 16); p[2] = (unsigned char)(v >> 8); p[3] = (unsigned char)v;
+}
+
+static void shot_chunk_begin(FILE *f, uint32_t len, const char *type, uint32_t *crc) {
+    unsigned char b[4];
+    shot_put32(b, len);
+    fwrite(b, 1, 4, f);
+    fwrite(type, 1, 4, f);
+    *crc = shot_crc_update(0xFFFFFFFFu, (const unsigned char *)type, 4);
+}
+
+static void shot_chunk_data(FILE *f, const void *data, size_t len, uint32_t *crc) {
+    fwrite(data, 1, len, f);
+    *crc = shot_crc_update(*crc, (const unsigned char *)data, len);
+}
+
+static void shot_chunk_end(FILE *f, uint32_t crc) {
+    unsigned char b[4];
+    shot_put32(b, ~crc);
+    fwrite(b, 1, 4, f);
+}
+
+// Writes an RGB PNG from bottom-up RGBA pixels (what glReadPixels returns). The image data is stored without
+// compression (no zlib needed), so the files are large but always valid.
+static int android_write_png(const char *path, const unsigned char *rgba, int w, int h) {
+    if (!shot_crc_ready) shot_crc_init();
+    size_t rowlen = 1 + (size_t)w * 3;
+    size_t rawlen = rowlen * (size_t)h;
+    unsigned char *raw = (unsigned char *)malloc(rawlen);
+    if (!raw) return 0;
+    for (int y = 0; y < h; y++) {
+        const unsigned char *src = rgba + (size_t)(h - 1 - y) * (size_t)w * 4;
+        unsigned char *dst = raw + (size_t)y * rowlen;
+        *dst++ = 0;   // PNG filter type 0 (none)
+        for (int x = 0; x < w; x++) {
+            dst[0] = src[0]; dst[1] = src[1]; dst[2] = src[2];
+            dst += 3; src += 4;
+        }
+    }
+    uint32_t a = 1, b = 0;
+    for (size_t i = 0; i < rawlen; i++) {
+        a += raw[i]; if (a >= 65521u) a -= 65521u;
+        b += a;      if (b >= 65521u) b -= 65521u;
+    }
+
+    FILE *f = fopen(path, "wb");
+    if (!f) { free(raw); return 0; }
+
+    static const unsigned char sig[8] = { 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A };
+    fwrite(sig, 1, 8, f);
+
+    unsigned char ihdr[13];
+    shot_put32(ihdr, (uint32_t)w);
+    shot_put32(ihdr + 4, (uint32_t)h);
+    ihdr[8] = 8; ihdr[9] = 2; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;   // 8 bit, RGB
+    uint32_t crc;
+    shot_chunk_begin(f, 13, "IHDR", &crc);
+    shot_chunk_data(f, ihdr, 13, &crc);
+    shot_chunk_end(f, crc);
+
+    size_t nblocks = (rawlen + 65534) / 65535;
+    uint32_t idat_len = (uint32_t)(2 + nblocks * 5 + rawlen + 4);
+    shot_chunk_begin(f, idat_len, "IDAT", &crc);
+    static const unsigned char zhdr[2] = { 0x78, 0x01 };
+    shot_chunk_data(f, zhdr, 2, &crc);
+    size_t pos = 0;
+    while (pos < rawlen) {
+        size_t n = rawlen - pos;
+        if (n > 65535) n = 65535;
+        unsigned char bh[5];
+        bh[0] = (pos + n >= rawlen) ? 1 : 0;
+        bh[1] = (unsigned char)(n & 0xFF);        bh[2] = (unsigned char)(n >> 8);
+        bh[3] = (unsigned char)(~n & 0xFF);       bh[4] = (unsigned char)((~n >> 8) & 0xFF);
+        shot_chunk_data(f, bh, 5, &crc);
+        shot_chunk_data(f, raw + pos, n, &crc);
+        pos += n;
+    }
+    unsigned char ad[4];
+    shot_put32(ad, (b << 16) | a);
+    shot_chunk_data(f, ad, 4, &crc);
+    shot_chunk_end(f, crc);
+
+    shot_chunk_begin(f, 0, "IEND", &crc);
+    shot_chunk_end(f, crc);
+
+    int ok = !ferror(f);
+    if (fclose(f) != 0) ok = 0;
+    free(raw);
+    return ok;
+}
+
+static void android_take_screenshot(void) {
+    android_screenshot_result = -1;
+    int w = 0, h = 0;
+    SDL_GL_GetDrawableSize(wnd, &w, &h);
+    if (w <= 0 || h <= 0) return;
+    unsigned char *px = (unsigned char *)malloc((size_t)w * (size_t)h * 4);
+    if (!px) return;
+
+    GLint prev_fbo = 0;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prev_fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)prev_fbo);
+
+    mkdir("screenshots", 0777);
+    char stamp[40];
+    time_t t = time(NULL);
+    struct tm *lt = localtime(&t);
+    if (lt) strftime(stamp, sizeof(stamp), "%Y%m%d_%H%M%S", lt);
+    else snprintf(stamp, sizeof(stamp), "%ld", (long)t);
+    snprintf(android_screenshot_name, sizeof(android_screenshot_name), "screenshots/screenshot_%s.png", stamp);
+
+    int ok = android_write_png(android_screenshot_name, px, w, h);
+    free(px);
+    android_screenshot_result = ok ? 1 : -1;
+    fprintf(stdout, "[screenshot] %s %dx%d %s\n", android_screenshot_name, w, h, ok ? "saved" : "FAILED");
+    fflush(stdout);
+}
+#endif
+
 static void gfx_sdl_swap_buffers_begin(void) {
     if (use_timer) sync_framerate_with_timer();
+#ifdef __ANDROID__
+    if (android_screenshot_request) {
+        android_screenshot_request = 0;
+        android_take_screenshot();
+    }
+#endif
     SDL_GL_SwapWindow(wnd);
 }
 
