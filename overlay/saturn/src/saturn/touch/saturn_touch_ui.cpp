@@ -16,6 +16,58 @@ extern "C" {
 extern bool showMenu, showStatusBars, windowStats, windowCcEditor, windowAnimPlayer, windowSettings;
 extern bool autoChroma, k_popout_open;
 
+// Screenshot: every panel is hidden for a few frames, one clean frame is saved as a PNG (see gfx_sdl2.c), then
+// everything comes back. Started from the "Take screenshot" button in the touch menu.
+extern "C" {
+    extern int android_screenshot_request;
+    extern int android_screenshot_result;
+    extern char android_screenshot_name[96];
+}
+static int g_shot_state = 0;    // 0 = idle, counts down while a screenshot is in progress
+static int g_shot_toast = 0;    // frames left to show the "saved" message
+static struct { bool menu, bars, stats, cc, anim, settings, popout; int hide; } g_shot_saved;
+
+static void screenshot_begin(void) {
+    if (g_shot_state > 0) return;
+    g_shot_saved.menu = showMenu;           g_shot_saved.bars = showStatusBars;
+    g_shot_saved.stats = windowStats;       g_shot_saved.cc = windowCcEditor;
+    g_shot_saved.anim = windowAnimPlayer;   g_shot_saved.settings = windowSettings;
+    g_shot_saved.popout = k_popout_open;    g_shot_saved.hide = touch_hide_state;
+    showMenu = false; showStatusBars = false; windowStats = false; windowCcEditor = false;
+    windowAnimPlayer = false; windowSettings = false; k_popout_open = false;
+    touch_hide_state = 1;
+    touch_menu_open = 0;
+    android_screenshot_result = 0;
+    g_shot_toast = 0;
+    g_shot_state = 6;
+}
+
+static void screenshot_step(void) {
+    if (g_shot_state <= 0) return;
+    g_shot_state--;
+    if (g_shot_state == 2) android_screenshot_request = 1;   // this frame is saved right before it is shown
+    if (g_shot_state == 0) {
+        showMenu = g_shot_saved.menu;           showStatusBars = g_shot_saved.bars;
+        windowStats = g_shot_saved.stats;       windowCcEditor = g_shot_saved.cc;
+        windowAnimPlayer = g_shot_saved.anim;   windowSettings = g_shot_saved.settings;
+        k_popout_open = g_shot_saved.popout;    touch_hide_state = g_shot_saved.hide;
+        g_shot_toast = 150;
+    }
+}
+
+static void draw_screenshot_toast(ImDrawList *dl, ImVec2 ds) {
+    if (g_shot_toast <= 0 || g_shot_state > 0 || android_screenshot_result == 0) return;
+    g_shot_toast--;
+    char msg[160];
+    if (android_screenshot_result > 0) snprintf(msg, sizeof(msg), "Saved: %s", android_screenshot_name);
+    else snprintf(msg, sizeof(msg), "Screenshot failed");
+    ImVec2 ts = ImGui::CalcTextSize(msg);
+    ImVec2 p0((ds.x - ts.x) * 0.5f - 12.f, ds.y * 0.06f);
+    ImVec2 p1(p0.x + ts.x + 24.f, p0.y + ts.y + 16.f);
+    dl->AddRectFilled(p0, p1, IM_COL32(0, 0, 0, 200), 8.f);
+    dl->AddText(ImVec2(p0.x + 12.f, p0.y + 8.f), IM_COL32(255, 255, 255, 255), msg);
+}
+
 static ImU32 rgba(float r, float g, float b, float a) {
     if (r > 255.f) r = 255.f; if (g > 255.f) g = 255.f; if (b > 255.f) b = 255.f;
     if (a > 1.f) a = 1.f; if (a < 0.f) a = 0.f;
@@ -116,6 +168,7 @@ static void draw_stick(ImDrawList *dl, ImVec2 ds, bool selected) {
 }
 
 static void draw_toolbar(ImDrawList *dl, ImVec2 ds) {
+    if (g_shot_state > 0) return;   // nothing on screen while a screenshot is taken
     for (int i = 0; i < 2; i++) {
         ImVec2 c(touch_tool_x[i] * ds.x, touch_tool_y * ds.y);
         float r = touch_tool_r * ds.y;
@@ -168,6 +221,7 @@ static void draw_quick_menu(ImVec2 ds) {
             touch_menu_open = 0;
             touch_layout_save();
         }
+        if (big_button("Take screenshot (PNG)###q_shot")) screenshot_begin();
         if (big_button("Edit layout and colors###q_edit")) {
             touch_edit = 1;
             touch_selected = -2;
@@ -281,6 +335,8 @@ extern "C" void saturn_touch_ui(void) {
         if (!touch_menu_open) touch_layout_save();
     }
 
+    screenshot_step();
+
     bool show_game = (touch_hide_state == 0) || touch_edit;
     if (show_game) {
         for (int i = 0; i < TB_COUNT; i++) {
@@ -298,6 +354,7 @@ extern "C" void saturn_touch_ui(void) {
     }
 
     draw_toolbar(dl, ds);
+    draw_screenshot_toast(dl, ds);
     draw_quick_menu(ds);
     if (touch_edit) draw_edit_panel(ds);
 }
