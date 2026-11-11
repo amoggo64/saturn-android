@@ -28,6 +28,10 @@
 #include <stdio.h>
 #include <unistd.h>
 
+#ifdef __ANDROID__
+void saturn_game_toggles_save(void);   // saturn_imgui_machinima.cpp
+#endif
+
 #include "gfx_window_manager_api.h"
 #include "gfx_screen_config.h"
 #include "../pc_main.h"
@@ -357,6 +361,7 @@ static void gfx_sdl_handle_events(void) {
             case SDL_APP_DIDENTERBACKGROUND:
             case SDL_APP_TERMINATING:
                 configfile_save(configfile_name());
+                saturn_game_toggles_save();
                 break;
 #endif
         }
@@ -370,6 +375,7 @@ static void gfx_sdl_handle_events(void) {
         if (last_config_save == 0) last_config_save = now_ticks;
         if (now_ticks - last_config_save >= 10000) {
             configfile_save(configfile_name());
+            saturn_game_toggles_save();
             last_config_save = now_ticks;
         }
     }
